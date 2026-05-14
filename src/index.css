@@ -1,0 +1,224 @@
+@import "tailwindcss";
+
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root {
+  --bg-primary: #E8F0FE;
+  --bg-secondary: #F4F3F0;
+  --bg-card: #FFFFFF;
+  --text-primary: #0B0F14;
+  --text-secondary: #6B7280;
+  --text-muted: #9CA3AF;
+  --border: #E5E5E3;
+  --border-hover: #C4C2BD;
+  --accent: #2563EB;
+
+  --status-open-bg: #ECFDF5;
+  --status-open-text: #047857;
+  --status-open-dot: #10B981;
+  --status-uw-bg: #FFFBEB;
+  --status-uw-text: #B45309;
+  --status-uw-dot: #F59E0B;
+  --status-pass-bg: #FEF2F2;
+  --status-pass-text: #B91C1C;
+  --status-pass-dot: #EF4444;
+  --status-offer-bg: #EFF6FF;
+  --status-offer-text: #1D4ED8;
+  --status-offer-dot: #3B82F6;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.header-alive {
+  background-color: var(--bg-primary);
+}
+
+/* Live dot pulse */
+@keyframes livePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+}
+.live-dot {
+  animation: livePulse 2s ease-in-out infinite;
+}
+
+/* Status dropdown styling */
+.status-select {
+  appearance: none;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  transition: all 0.2s ease;
+}
+.status-select:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* Card entrance animation */
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.deal-card {
+  animation: cardIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Left accent border on hover */
+.deal-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--card-accent, var(--accent));
+  transform: scaleY(0);
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  border-radius: 0 2px 2px 0;
+}
+.deal-card:hover::before {
+  transform: scaleY(1);
+}
+
+/* Card hover lift */
+.deal-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+/* Status flash on change */
+@keyframes statusFlash {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.15); }
+  60% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+.status-changed {
+  animation: statusFlash 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Stat card */
+.stat-card {
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+.stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+/* Stat bar animation */
+@keyframes barGrow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+.stat-bar {
+  transform-origin: left;
+  animation: barGrow 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Stat number count-up feel */
+@keyframes countPop {
+  0% { opacity: 0; transform: translateY(8px); }
+  60% { transform: translateY(-2px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.stat-count {
+  animation: countPop 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* External link icon */
+.deal-link::after {
+  content: '↗';
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 11px;
+  opacity: 0;
+  transform: translate(-4px, 4px);
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  color: var(--text-muted);
+}
+.deal-link:hover::after {
+  opacity: 0.6;
+  transform: translate(0, 0);
+}
+
+/* Filter tab underline */
+.filter-tab {
+  position: relative;
+  transition: color 0.2s ease;
+}
+.filter-tab::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.filter-tab.active::after {
+  transform: scaleX(1);
+}
+.filter-tab:hover:not(.active) {
+  color: var(--text-primary);
+}
+
+/* Section date label */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.date-label {
+  animation: slideIn 0.3s ease-out both;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #D1D5DB;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9CA3AF;
+}
+
+/* New deal badge pulse */
+@keyframes newPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.new-badge {
+  animation: newPulse 1.5s ease-in-out 3;
+}
