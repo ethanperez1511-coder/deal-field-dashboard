@@ -256,9 +256,13 @@ async function fetchInboxDeals() {
 const app = express()
 app.use(express.json())
 
-// CORS for Vite dev server
+// CORS
+const ALLOWED_ORIGINS = ['https://deal-field-dashboard.vercel.app', 'http://localhost:5173']
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*')
+  const origin = req.headers.origin
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin)
+  }
   res.header('Access-Control-Allow-Headers', 'Content-Type')
   res.header('Access-Control-Allow-Methods', 'GET, PATCH, DELETE, OPTIONS')
   if (req.method === 'OPTIONS') return res.sendStatus(200)
@@ -350,7 +354,7 @@ app.post('/api/fetch-deals', async (req, res) => {
   res.json(loadDeals())
 })
 
-const PORT = 3001
+const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
   console.log(`Deal server running on http://localhost:${PORT}`)
 

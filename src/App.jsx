@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabaseClient'
 
-const API_URL = import.meta.env.DEV ? 'http://localhost:3001' : ''
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '')
 const DETAIL_BASE = 'https://web-production-c0cae.up.railway.app'
 
 const STATUSES = ['Open', 'In U/W', 'Pass', 'Offer Out']
