@@ -257,7 +257,7 @@ const app = express()
 app.use(express.json())
 
 // CORS
-const ALLOWED_ORIGINS = ['https://deal-field-dashboard.vercel.app', 'http://localhost:5173']
+const ALLOWED_ORIGINS = ['https://deal-field-dashboard.vercel.app', 'https://courageous-ambition-production-df45.up.railway.app', 'http://localhost:5173']
 app.use((req, res, next) => {
   const origin = req.headers.origin
   if (ALLOWED_ORIGINS.includes(origin)) {
