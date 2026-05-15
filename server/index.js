@@ -208,7 +208,7 @@ async function fetchInboxDeals() {
     try {
       const { data: sbDeal } = await supabase
         .from('deals')
-        .select('id,business_name,broker_name,true_revenue_avg,avg_holdback_pct,requested_amount,monthly_revenue')
+        .select('id,business_name,dba,broker_name,true_revenue_avg,avg_holdback_pct,requested_amount,monthly_revenue')
         .eq('email_id', msg.id)
         .maybeSingle()
       if (sbDeal) {
@@ -226,7 +226,7 @@ async function fetchInboxDeals() {
       id: nextId,
       emailId: msg.id,
       supabaseId,
-      name: cleanDealName(sbData.business_name || dealInfo.name || msg.subject) || 'Unknown Business',
+      name: cleanDealName(sbData.dba || sbData.business_name || dealInfo.name || msg.subject) || 'Unknown Business',
       broker: sbData.broker_name || dealInfo.broker || msg.from?.emailAddress?.name || 'Unknown',
       trueRevenue: Math.round(revenue),
       holdback,
@@ -311,13 +311,13 @@ async function enrichDeals() {
     try {
       const { data: sb } = await supabase
         .from('deals')
-        .select('id,business_name,broker_name,true_revenue_avg,avg_holdback_pct')
+        .select('id,business_name,dba,broker_name,true_revenue_avg,avg_holdback_pct')
         .eq('email_id', deal.emailId)
         .maybeSingle()
       if (!sb) continue
       deal.supabaseId = sb.id
       deal.detailUrl = `${DETAIL_BASE_URL}/?deal_id=${sb.id}`
-      if (sb.business_name) deal.name = cleanDealName(sb.business_name)
+      if (sb.dba || sb.business_name) deal.name = cleanDealName(sb.dba || sb.business_name)
       if (sb.broker_name) deal.broker = sb.broker_name
       if (sb.true_revenue_avg) deal.trueRevenue = Math.round(sb.true_revenue_avg)
       if (sb.avg_holdback_pct != null) deal.holdback = sb.avg_holdback_pct / 100
