@@ -199,17 +199,9 @@ function DealCard({ deal, onStatusChange, onNotesChange, onDelete, index, select
 
       {/* Footer: Meta + Delete */}
       <div className="flex items-center gap-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
-        {deal.attachmentCount > 0 && (
-          <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M13.5 7.5l-5.7 5.7a3.2 3.2 0 01-4.5-4.5l5.7-5.7a2.1 2.1 0 013 3L6.3 11.7a1.1 1.1 0 01-1.5-1.5L10 5" />
-            </svg>
-            {deal.attachmentCount}
-          </span>
-        )}
-        {deal.holdback > 0 && (
-          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            {Math.round(deal.holdback * 100)}% HB
+        {deal.state && (
+          <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+            {deal.state}
           </span>
         )}
         <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -254,6 +246,8 @@ export default function App() {
   const [bulkStatus, setBulkStatus] = useState('')
   const prevCountRef = useRef(0)
   const [newDealFlash, setNewDealFlash] = useState(false)
+  const [lastRefresh, setLastRefresh] = useState(null)
+  const [secondsAgo, setSecondsAgo] = useState(0)
 
   const fetchDeals = useCallback(async () => {
     try {
@@ -267,6 +261,7 @@ export default function App() {
       prevCountRef.current = data.length
       setDeals(data)
       setError(null)
+      setLastRefresh(Date.now())
     } catch (err) {
       setError(err.message)
     } finally {
@@ -274,10 +269,33 @@ export default function App() {
     }
   }, [])
 
+  // Poll every 30s + refresh on tab focus + tick "last refreshed" counter
   useEffect(() => {
     fetchDeals()
     const interval = setInterval(fetchDeals, 30_000)
-    return () => clearInterval(interval)
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchDeals()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+
+    const onFocus = () => fetchDeals()
+    window.addEventListener('focus', onFocus)
+
+    // Update "X seconds ago" display every 10s
+    const ticker = setInterval(() => {
+      setLastRefresh(prev => {
+        if (prev) setSecondsAgo(Math.round((Date.now() - prev) / 1000))
+        return prev
+      })
+    }, 10_000)
+
+    return () => {
+      clearInterval(interval)
+      clearInterval(ticker)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onFocus)
+    }
   }, [fetchDeals])
 
   const updateStatus = useCallback(async (dealId, newStatus) => {
@@ -432,6 +450,11 @@ export default function App() {
                 {deals.length} deal{deals.length !== 1 ? 's' : ''}
                 {newDealFlash && ' ✦'}
               </span>
+              {lastRefresh && (
+                <span className="text-[10px] tabular-nums" style={{ color: '#9CA3AF' }}>
+                  {secondsAgo < 10 ? 'just now' : secondsAgo < 60 ? `${secondsAgo}s ago` : `${Math.round(secondsAgo / 60)}m ago`}
+                </span>
+              )}
               <button
                 onClick={() => supabase.auth.signOut()}
                 className="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors hover:bg-white/50"

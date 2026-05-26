@@ -208,7 +208,7 @@ async function fetchInboxDeals() {
     try {
       const { data: sbDeal } = await supabase
         .from('deals')
-        .select('id,business_name,dba,broker_name,true_revenue_avg,avg_holdback_pct,requested_amount,monthly_revenue')
+        .select('id,business_name,dba,broker_name,true_revenue_avg,avg_holdback_pct,requested_amount,monthly_revenue,state')
         .eq('email_id', msg.id)
         .maybeSingle()
       if (sbDeal) {
@@ -236,6 +236,7 @@ async function fetchInboxDeals() {
       detailUrl: supabaseId
         ? `${DETAIL_BASE_URL}/?deal_id=${supabaseId}`
         : null,
+      state: sbData.state || null,
       attachmentCount: pdfAttachments.length,
       emailSubject: msg.subject,
       attachmentDir: emailDir,
@@ -250,6 +251,20 @@ async function fetchInboxDeals() {
     saveDeals(deals)
     console.log(`Added ${newCount} new deal(s). Total: ${deals.length}`)
   }
+}
+
+// Health tracking
+const health = {
+  startedAt: new Date().toISOString(),
+  lastFetchAttempt: null,
+  lastFetchSuccess: null,
+  lastFetchError: null,
+  lastEnrichAttempt: null,
+  lastEnrichSuccess: null,
+  lastEnrichError: null,
+  fetchCount: 0,
+  enrichCount: 0,
+  errorCount: 0,
 }
 
 // Express server
@@ -311,7 +326,7 @@ async function enrichDeals() {
     try {
       const { data: sb } = await supabase
         .from('deals')
-        .select('id,business_name,dba,broker_name,true_revenue_avg,avg_holdback_pct')
+        .select('id,business_name,dba,broker_name,true_revenue_avg,avg_holdback_pct,state')
         .eq('email_id', deal.emailId)
         .maybeSingle()
       if (!sb) continue
@@ -321,6 +336,7 @@ async function enrichDeals() {
       if (sb.broker_name) deal.broker = sb.broker_name
       if (sb.true_revenue_avg) deal.trueRevenue = Math.round(sb.true_revenue_avg)
       if (sb.avg_holdback_pct != null) deal.holdback = sb.avg_holdback_pct / 100
+      if (sb.state) deal.state = sb.state
       enriched++
     } catch (err) {
       console.error(`Enrich failed for ${deal.name}:`, err.message)
@@ -348,22 +364,90 @@ app.delete('/api/deals/:id', (req, res) => {
   res.json({ ok: true })
 })
 
+// Health endpoint
+app.get('/api/health', (req, res) => {
+  const now = new Date()
+  const lastFetch = health.lastFetchSuccess ? new Date(health.lastFetchSuccess) : null
+  const lastEnrich = health.lastEnrichSuccess ? new Date(health.lastEnrichSuccess) : null
+  const fetchAgeMs = lastFetch ? now - lastFetch : null
+  const enrichAgeMs = lastEnrich ? now - lastEnrich : null
+
+  const issues = []
+  if (!lastFetch) issues.push('Never fetched successfully')
+  else if (fetchAgeMs > 5 * 60 * 1000) issues.push(`Last fetch ${Math.round(fetchAgeMs / 60000)}m ago`)
+  if (!lastEnrich) issues.push('Never enriched successfully')
+  else if (enrichAgeMs > 5 * 60 * 1000) issues.push(`Last enrich ${Math.round(enrichAgeMs / 60000)}m ago`)
+
+  const ok = issues.length === 0
+  res.status(ok ? 200 : 503).json({
+    status: ok ? 'healthy' : 'degraded',
+    issues,
+    uptime: Math.round((now - new Date(health.startedAt)) / 1000),
+    ...health,
+    dealCount: loadDeals().length,
+  })
+})
+
 // Manual trigger
 app.post('/api/fetch-deals', async (req, res) => {
   await fetchInboxDeals()
   res.json(loadDeals())
 })
 
+// Wrapped versions that never throw — keeps setInterval alive
+async function safeFetchInboxDeals() {
+  health.lastFetchAttempt = new Date().toISOString()
+  try {
+    await fetchInboxDeals()
+    health.lastFetchSuccess = new Date().toISOString()
+    health.fetchCount++
+    health.lastFetchError = null
+    console.log(`[heartbeat] fetch OK — ${loadDeals().length} deals`)
+  } catch (err) {
+    health.lastFetchError = err.message
+    health.errorCount++
+    console.error(`[heartbeat] fetch FAILED:`, err.message)
+  }
+}
+
+async function safeEnrichDeals() {
+  health.lastEnrichAttempt = new Date().toISOString()
+  try {
+    await enrichDeals()
+    health.lastEnrichSuccess = new Date().toISOString()
+    health.enrichCount++
+    health.lastEnrichError = null
+  } catch (err) {
+    health.lastEnrichError = err.message
+    health.errorCount++
+    console.error(`[heartbeat] enrich FAILED:`, err.message)
+  }
+}
+
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
   console.log(`Deal server running on http://localhost:${PORT}`)
 
   // Initial fetch + enrich
-  fetchInboxDeals().then(() => enrichDeals())
+  safeFetchInboxDeals().then(() => safeEnrichDeals())
 
-  // Poll inbox every 1 minute
-  setInterval(fetchInboxDeals, 60 * 1000)
+  // Poll inbox every 2 minutes
+  setInterval(safeFetchInboxDeals, 2 * 60 * 1000)
 
-  // Re-enrich from Supabase every 1 minute
-  setInterval(enrichDeals, 60 * 1000)
+  // Re-enrich from Supabase every 2 minutes
+  setInterval(safeEnrichDeals, 2 * 60 * 1000)
+
+  // Self-ping keepalive — prevents Railway from sleeping
+  const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : `http://localhost:${PORT}`
+  setInterval(() => {
+    fetch(`${SELF_URL}/api/health`).catch(() => {})
+  }, 4 * 60 * 1000)
+
+  // Heartbeat log every 5 minutes
+  setInterval(() => {
+    const uptime = Math.round((Date.now() - new Date(health.startedAt).getTime()) / 60000)
+    console.log(`[heartbeat] uptime=${uptime}m fetches=${health.fetchCount} enriches=${health.enrichCount} errors=${health.errorCount} deals=${loadDeals().length}`)
+  }, 5 * 60 * 1000)
 })
