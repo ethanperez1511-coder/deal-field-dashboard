@@ -123,6 +123,29 @@ function extractDealInfo(text) {
     if (m) { info.broker = m[1].trim(); break }
   }
 
+  // State — try labeled fields first, then fall back to 2-letter state code near city/zip patterns
+  const US_STATES = new Set([
+    'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+    'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+    'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+    'VA','WA','WV','WI','WY','DC',
+  ])
+  const statePatterns = [
+    // Labeled: "State: TX" or "State/Province: TX"
+    /(?:state|state\/province|st)[:\s]+([A-Z]{2})\b/i,
+    // "City, ST ZIP" pattern (most common in addresses)
+    /[A-Za-z]+[,\s]+([A-Z]{2})\s+\d{5}/,
+    // "City, ST" without zip
+    /[A-Za-z]+[,]\s*([A-Z]{2})\s*$/m,
+  ]
+  for (const p of statePatterns) {
+    const m = text.match(p)
+    if (m) {
+      const candidate = m[1].toUpperCase()
+      if (US_STATES.has(candidate)) { info.state = candidate; break }
+    }
+  }
+
   return info
 }
 
@@ -236,7 +259,7 @@ async function fetchInboxDeals() {
       detailUrl: supabaseId
         ? `${DETAIL_BASE_URL}/?deal_id=${supabaseId}`
         : null,
-      state: sbData.state || null,
+      state: sbData.state || dealInfo.state || null,
       attachmentCount: pdfAttachments.length,
       emailSubject: msg.subject,
       attachmentDir: emailDir,
