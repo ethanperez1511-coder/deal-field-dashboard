@@ -200,7 +200,7 @@ function DealCard({ deal, onStatusChange, onNotesChange, onDelete, index, select
       {/* Footer: Meta + Delete */}
       <div className="flex items-center gap-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
         {deal.state && (
-          <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+          <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
             {deal.state}
           </span>
         )}
