@@ -13,23 +13,10 @@ const DETAIL_BASE_URL = 'https://web-production-c0cae.up.railway.app'
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DEALS_FILE = path.join(__dirname, '..', 'deals.json')
 const ATTACHMENTS_DIR = path.join(__dirname, '..', 'attachments')
 
 // Ensure attachments dir exists
 if (!fs.existsSync(ATTACHMENTS_DIR)) fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true })
-
-// Load persisted deals
-function loadDeals() {
-  if (fs.existsSync(DEALS_FILE)) {
-    return JSON.parse(fs.readFileSync(DEALS_FILE, 'utf-8'))
-  }
-  return []
-}
-
-function saveDeals(deals) {
-  fs.writeFileSync(DEALS_FILE, JSON.stringify(deals, null, 2))
-}
 
 // MSAL setup
 const msalConfig = {
@@ -80,7 +67,6 @@ function cleanDealName(name) {
 function extractDealInfo(text) {
   const info = {}
 
-  // Try common patterns for business name
   const namePatterns = [
     /(?:business\s*name|company\s*name|legal\s*name|dba|doing\s*business\s*as)[:\s]+([^\n]+)/i,
     /(?:applicant|merchant)[:\s]+([^\n]+)/i,
@@ -90,7 +76,6 @@ function extractDealInfo(text) {
     if (m) { info.name = m[1].trim(); break }
   }
 
-  // Revenue / amount requested
   const revPatterns = [
     /(?:amount\s*requested|funding\s*amount|loan\s*amount|advance\s*amount)[:\s]*\$?([\d,]+)/i,
     /(?:revenue|gross\s*revenue|annual\s*revenue)[:\s]*\$?([\d,]+)/i,
@@ -100,7 +85,6 @@ function extractDealInfo(text) {
     if (m) { info.revenue = parseInt(m[1].replace(/,/g, ''), 10); break }
   }
 
-  // Holdback / factor rate
   const holdbackPatterns = [
     /(?:holdback|hold\s*back)[:\s]*([\d.]+)\s*%/i,
     /(?:factor\s*rate)[:\s]*([\d.]+)/i,
@@ -114,7 +98,6 @@ function extractDealInfo(text) {
     }
   }
 
-  // Broker
   const brokerPatterns = [
     /(?:broker|iso|referral\s*partner|submitted\s*by)[:\s]+([^\n]+)/i,
   ]
@@ -123,7 +106,6 @@ function extractDealInfo(text) {
     if (m) { info.broker = m[1].trim(); break }
   }
 
-  // State — try labeled fields first, then fall back to 2-letter state code near city/zip patterns
   const US_STATES = new Set([
     'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
     'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
@@ -131,11 +113,8 @@ function extractDealInfo(text) {
     'VA','WA','WV','WI','WY','DC',
   ])
   const statePatterns = [
-    // Labeled: "State: TX" or "State/Province: TX"
     /(?:state|state\/province|st)[:\s]+([A-Z]{2})\b/i,
-    // "City, ST ZIP" pattern (most common in addresses)
     /[A-Za-z]+[,\s]+([A-Z]{2})\s+\d{5}/,
-    // "City, ST" without zip
     /[A-Za-z]+[,]\s*([A-Z]{2})\s*$/m,
   ]
   for (const p of statePatterns) {
@@ -149,9 +128,41 @@ function extractDealInfo(text) {
   return info
 }
 
+// Load deals from Supabase — single source of truth
+async function loadDeals() {
+  const { data, error } = await supabase
+    .from('deals')
+    .select('id,email_id,business_name,dba,broker_name,true_revenue_avg,avg_holdback_pct,state,subject,from_address,received_at,dashboard_status,dashboard_notes')
+    .neq('dashboard_status', 'Deleted')
+    .order('received_at', { ascending: false })
+  if (error) {
+    console.error('loadDeals failed:', error.message)
+    return []
+  }
+  return data.map(row => ({
+    id: row.id,
+    emailId: row.email_id,
+    supabaseId: row.id,
+    name: cleanDealName(row.dba || row.business_name || row.subject) || 'Unknown Business',
+    broker: row.broker_name || row.from_address || 'Unknown',
+    trueRevenue: Math.round(row.true_revenue_avg || 0),
+    holdback: row.avg_holdback_pct != null ? row.avg_holdback_pct / 100 : 0,
+    status: row.dashboard_status || 'Open',
+    date: row.received_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+    receivedAt: row.received_at || new Date().toISOString(),
+    detailUrl: `${DETAIL_BASE_URL}/?deal_id=${row.id}`,
+    state: row.state || null,
+    notes: row.dashboard_notes || '',
+    emailSubject: row.subject,
+  }))
+}
+
 async function fetchInboxDeals() {
-  const deals = loadDeals()
-  const processedIds = new Set(deals.map(d => d.emailId))
+  // Get already-processed email IDs from Supabase
+  const { data: existing } = await supabase
+    .from('deals')
+    .select('email_id')
+  const processedIds = new Set((existing || []).map(d => d.email_id).filter(Boolean))
 
   let token
   try {
@@ -192,7 +203,7 @@ async function fetchInboxDeals() {
     )
     if (pdfAttachments.length === 0) continue
 
-    // Save PDFs and extract info from first (application) PDF
+    // Save PDFs and extract info from first PDF
     const emailDir = path.join(ATTACHMENTS_DIR, msg.id.substring(0, 40))
     if (!fs.existsSync(emailDir)) fs.mkdirSync(emailDir, { recursive: true })
 
@@ -201,7 +212,6 @@ async function fetchInboxDeals() {
       const att = pdfAttachments[i]
       const filePath = path.join(emailDir, att.name)
 
-      // Inline attachments have contentBytes, large ones need separate fetch
       let buf
       if (att.contentBytes) {
         buf = Buffer.from(att.contentBytes, 'base64')
@@ -211,7 +221,6 @@ async function fetchInboxDeals() {
       }
       fs.writeFileSync(filePath, buf)
 
-      // Parse first PDF for deal info (likely the application)
       if (i === 0) {
         try {
           const parser = new PDFParse({ data: new Uint8Array(buf) })
@@ -225,54 +234,48 @@ async function fetchInboxDeals() {
       }
     }
 
-    // Look up Supabase deal by email_id for detail link + real data
-    let supabaseId = null
-    let sbData = {}
-    try {
-      const { data: sbDeal } = await supabase
+    // Check if this email already has a Supabase row (created by extraction service)
+    const { data: existingDeal } = await supabase
+      .from('deals')
+      .select('id')
+      .eq('email_id', msg.id)
+      .maybeSingle()
+
+    if (existingDeal) {
+      // Row exists from extraction service — just ensure dashboard_status is set
+      await supabase
         .from('deals')
-        .select('id,business_name,dba,broker_name,true_revenue_avg,avg_holdback_pct,requested_amount,monthly_revenue,state')
-        .eq('email_id', msg.id)
-        .maybeSingle()
-      if (sbDeal) {
-        supabaseId = sbDeal.id
-        sbData = sbDeal
+        .update({ dashboard_status: 'Open' })
+        .eq('id', existingDeal.id)
+        .is('dashboard_status', null)
+    } else {
+      // No row yet — insert minimal row so dashboard can track it
+      const { error: insertErr } = await supabase
+        .from('deals')
+        .insert({
+          email_id: msg.id,
+          subject: msg.subject,
+          from_address: msg.from?.emailAddress?.address || '',
+          broker_name: dealInfo.broker || msg.from?.emailAddress?.name || 'Unknown',
+          business_name: dealInfo.name || null,
+          state: dealInfo.state || null,
+          received_at: msg.receivedDateTime || new Date().toISOString(),
+          status: 'New',
+          dashboard_status: 'Open',
+        })
+      if (insertErr) {
+        console.error(`Insert failed for ${msg.id}:`, insertErr.message)
+        continue
       }
-    } catch (err) {
-      console.error('Supabase lookup failed:', err.message)
     }
 
-    const nextId = deals.length > 0 ? Math.max(...deals.map(d => d.id)) + 1 : 1
-    const revenue = sbData.true_revenue_avg || 0
-    const holdback = sbData.avg_holdback_pct != null ? sbData.avg_holdback_pct / 100 : 0
-    const deal = {
-      id: nextId,
-      emailId: msg.id,
-      supabaseId,
-      name: cleanDealName(sbData.dba || sbData.business_name || dealInfo.name || msg.subject) || 'Unknown Business',
-      broker: sbData.broker_name || dealInfo.broker || msg.from?.emailAddress?.name || 'Unknown',
-      trueRevenue: Math.round(revenue),
-      holdback,
-      status: 'Open',
-      date: msg.receivedDateTime?.split('T')[0] || new Date().toISOString().split('T')[0],
-      receivedAt: msg.receivedDateTime || new Date().toISOString(),
-      detailUrl: supabaseId
-        ? `${DETAIL_BASE_URL}/?deal_id=${supabaseId}`
-        : null,
-      state: sbData.state || dealInfo.state || null,
-      attachmentCount: pdfAttachments.length,
-      emailSubject: msg.subject,
-      attachmentDir: emailDir,
-    }
-
-    deals.push(deal)
     newCount++
-    console.log(`New deal: ${deal.name} (${pdfAttachments.length} PDFs)`)
+    const dealName = dealInfo.name || msg.subject
+    console.log(`New deal: ${dealName} (${pdfAttachments.length} PDFs)`)
   }
 
   if (newCount > 0) {
-    saveDeals(deals)
-    console.log(`Added ${newCount} new deal(s). Total: ${deals.length}`)
+    console.log(`Added ${newCount} new deal(s)`)
   }
 }
 
@@ -282,11 +285,7 @@ const health = {
   lastFetchAttempt: null,
   lastFetchSuccess: null,
   lastFetchError: null,
-  lastEnrichAttempt: null,
-  lastEnrichSuccess: null,
-  lastEnrichError: null,
   fetchCount: 0,
-  enrichCount: 0,
   errorCount: 0,
 }
 
@@ -308,116 +307,82 @@ app.use((req, res, next) => {
 })
 
 // Get all deals
-app.get('/api/deals', (req, res) => {
-  res.json(loadDeals())
+app.get('/api/deals', async (req, res) => {
+  res.json(await loadDeals())
 })
 
 // Update deal (status, notes)
-app.patch('/api/deals/:id', (req, res) => {
-  const deals = loadDeals()
+app.patch('/api/deals/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10)
-  const deal = deals.find(d => d.id === id)
-  if (!deal) return res.status(404).json({ error: 'Not found' })
-  if (req.body.status) deal.status = req.body.status
-  if (req.body.notes !== undefined) deal.notes = req.body.notes
-  saveDeals(deals)
-  res.json(deal)
+  const updates = {}
+  if (req.body.status) updates.dashboard_status = req.body.status
+  if (req.body.notes !== undefined) updates.dashboard_notes = req.body.notes
+
+  const { data, error } = await supabase
+    .from('deals')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) return res.status(404).json({ error: 'Not found' })
+  res.json({ id: data.id, status: data.dashboard_status, notes: data.dashboard_notes })
 })
 
 // Bulk status update
-app.patch('/api/deals/bulk/status', (req, res) => {
+app.patch('/api/deals/bulk/status', async (req, res) => {
   const { ids, status } = req.body
   if (!ids || !status) return res.status(400).json({ error: 'ids and status required' })
-  const deals = loadDeals()
-  let updated = 0
-  for (const deal of deals) {
-    if (ids.includes(deal.id)) {
-      deal.status = status
-      updated++
-    }
-  }
-  saveDeals(deals)
-  res.json({ updated })
+
+  const { count, error } = await supabase
+    .from('deals')
+    .update({ dashboard_status: status })
+    .in('id', ids)
+
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ updated: count || ids.length })
 })
 
-// Re-enrich all deals from Supabase
-async function enrichDeals() {
-  const deals = loadDeals()
-  let enriched = 0
-  for (const deal of deals) {
-    if (!deal.emailId) continue
-    try {
-      const { data: sb } = await supabase
-        .from('deals')
-        .select('id,business_name,dba,broker_name,true_revenue_avg,avg_holdback_pct,state')
-        .eq('email_id', deal.emailId)
-        .maybeSingle()
-      if (!sb) continue
-      deal.supabaseId = sb.id
-      deal.detailUrl = `${DETAIL_BASE_URL}/?deal_id=${sb.id}`
-      if (sb.dba || sb.business_name) deal.name = cleanDealName(sb.dba || sb.business_name)
-      if (sb.broker_name) deal.broker = sb.broker_name
-      if (sb.true_revenue_avg) deal.trueRevenue = Math.round(sb.true_revenue_avg)
-      if (sb.avg_holdback_pct != null) deal.holdback = sb.avg_holdback_pct / 100
-      if (sb.state) deal.state = sb.state
-      enriched++
-    } catch (err) {
-      console.error(`Enrich failed for ${deal.name}:`, err.message)
-    }
-  }
-  if (enriched > 0) {
-    saveDeals(deals)
-    console.log(`Enriched ${enriched}/${deals.length} deals from Supabase`)
-  }
-}
-
-app.post('/api/enrich', async (req, res) => {
-  await enrichDeals()
-  res.json(loadDeals())
-})
-
-// Delete deal (only when user says to)
-app.delete('/api/deals/:id', (req, res) => {
-  const deals = loadDeals()
+// Delete deal (soft-delete — set dashboard_status to Deleted so extraction service row stays)
+app.delete('/api/deals/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10)
-  const idx = deals.findIndex(d => d.id === id)
-  if (idx === -1) return res.status(404).json({ error: 'Not found' })
-  deals.splice(idx, 1)
-  saveDeals(deals)
+  const { error } = await supabase
+    .from('deals')
+    .update({ dashboard_status: 'Deleted' })
+    .eq('id', id)
+
+  if (error) return res.status(404).json({ error: 'Not found' })
   res.json({ ok: true })
 })
 
 // Health endpoint
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   const now = new Date()
   const lastFetch = health.lastFetchSuccess ? new Date(health.lastFetchSuccess) : null
-  const lastEnrich = health.lastEnrichSuccess ? new Date(health.lastEnrichSuccess) : null
   const fetchAgeMs = lastFetch ? now - lastFetch : null
-  const enrichAgeMs = lastEnrich ? now - lastEnrich : null
 
   const issues = []
   if (!lastFetch) issues.push('Never fetched successfully')
   else if (fetchAgeMs > 5 * 60 * 1000) issues.push(`Last fetch ${Math.round(fetchAgeMs / 60000)}m ago`)
-  if (!lastEnrich) issues.push('Never enriched successfully')
-  else if (enrichAgeMs > 5 * 60 * 1000) issues.push(`Last enrich ${Math.round(enrichAgeMs / 60000)}m ago`)
 
+  const deals = await loadDeals()
   const ok = issues.length === 0
   res.status(ok ? 200 : 503).json({
     status: ok ? 'healthy' : 'degraded',
     issues,
     uptime: Math.round((now - new Date(health.startedAt)) / 1000),
     ...health,
-    dealCount: loadDeals().length,
+    dealCount: deals.length,
   })
 })
 
 // Manual trigger
 app.post('/api/fetch-deals', async (req, res) => {
   await fetchInboxDeals()
-  res.json(loadDeals())
+  res.json(await loadDeals())
 })
 
-// Wrapped versions that never throw — keeps setInterval alive
+// Wrapped version that never throws — keeps setInterval alive
 async function safeFetchInboxDeals() {
   health.lastFetchAttempt = new Date().toISOString()
   try {
@@ -425,7 +390,8 @@ async function safeFetchInboxDeals() {
     health.lastFetchSuccess = new Date().toISOString()
     health.fetchCount++
     health.lastFetchError = null
-    console.log(`[heartbeat] fetch OK — ${loadDeals().length} deals`)
+    const deals = await loadDeals()
+    console.log(`[heartbeat] fetch OK — ${deals.length} deals`)
   } catch (err) {
     health.lastFetchError = err.message
     health.errorCount++
@@ -433,32 +399,15 @@ async function safeFetchInboxDeals() {
   }
 }
 
-async function safeEnrichDeals() {
-  health.lastEnrichAttempt = new Date().toISOString()
-  try {
-    await enrichDeals()
-    health.lastEnrichSuccess = new Date().toISOString()
-    health.enrichCount++
-    health.lastEnrichError = null
-  } catch (err) {
-    health.lastEnrichError = err.message
-    health.errorCount++
-    console.error(`[heartbeat] enrich FAILED:`, err.message)
-  }
-}
-
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
   console.log(`Deal server running on http://localhost:${PORT}`)
 
-  // Initial fetch + enrich
-  safeFetchInboxDeals().then(() => safeEnrichDeals())
+  // Initial fetch
+  safeFetchInboxDeals()
 
   // Poll inbox every 2 minutes
   setInterval(safeFetchInboxDeals, 2 * 60 * 1000)
-
-  // Re-enrich from Supabase every 2 minutes
-  setInterval(safeEnrichDeals, 2 * 60 * 1000)
 
   // Self-ping keepalive — prevents Railway from sleeping
   const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -469,8 +418,9 @@ app.listen(PORT, () => {
   }, 4 * 60 * 1000)
 
   // Heartbeat log every 5 minutes
-  setInterval(() => {
+  setInterval(async () => {
     const uptime = Math.round((Date.now() - new Date(health.startedAt).getTime()) / 60000)
-    console.log(`[heartbeat] uptime=${uptime}m fetches=${health.fetchCount} enriches=${health.enrichCount} errors=${health.errorCount} deals=${loadDeals().length}`)
+    const deals = await loadDeals()
+    console.log(`[heartbeat] uptime=${uptime}m fetches=${health.fetchCount} errors=${health.errorCount} deals=${deals.length}`)
   }, 5 * 60 * 1000)
 })
