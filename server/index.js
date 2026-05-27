@@ -243,12 +243,15 @@ async function fetchInboxDeals() {
       .maybeSingle()
 
     if (existingDeal) {
-      // Row exists from extraction service — just ensure dashboard_status is set
+      // Row exists from extraction service — set dashboard_status + fill state if missing
+      const updates = {}
+      if (dealInfo.state) updates.state = dealInfo.state
+      updates.dashboard_status = 'Open'
       await supabase
         .from('deals')
-        .update({ dashboard_status: 'Open' })
+        .update(updates)
         .eq('id', existingDeal.id)
-        .is('dashboard_status', null)
+        .is('state', null)
     } else {
       // No row yet — insert minimal row so dashboard can track it
       const { error: insertErr } = await supabase
@@ -381,6 +384,86 @@ app.get('/api/health', async (req, res) => {
 app.post('/api/fetch-deals', async (req, res) => {
   await fetchInboxDeals()
   res.json(await loadDeals())
+})
+
+// Backfill states — re-fetch PDFs from Outlook for deals missing state, extract and update
+app.post('/api/backfill-states', async (req, res) => {
+  // Get deals missing state
+  const { data: deals, error } = await supabase
+    .from('deals')
+    .select('id,email_id')
+    .is('state', null)
+    .not('status', 'in', '("No Attachments","No PDFs")')
+    .not('email_id', 'is', null)
+  if (error) return res.status(500).json({ error: error.message })
+
+  let token
+  try {
+    token = await getToken()
+  } catch (err) {
+    return res.status(500).json({ error: 'Auth failed: ' + err.message })
+  }
+
+  const user = process.env.OUTLOOK_USER
+  let updated = 0
+  let failed = 0
+  let noState = 0
+
+  for (const deal of deals) {
+    try {
+      // Fetch attachments for this email
+      const attUrl = `https://graph.microsoft.com/v1.0/users/${user}/messages/${deal.email_id}/attachments`
+      let attachments
+      try {
+        attachments = await graphGet(attUrl, token)
+      } catch {
+        failed++
+        continue
+      }
+
+      const pdfs = attachments.value.filter(
+        a => a.contentType === 'application/pdf' || a.name?.endsWith('.pdf')
+      )
+      if (pdfs.length === 0) { noState++; continue }
+
+      // Try each PDF until we find a state
+      let foundState = null
+      for (const att of pdfs) {
+        let buf
+        if (att.contentBytes) {
+          buf = Buffer.from(att.contentBytes, 'base64')
+        } else {
+          const contentUrl = `https://graph.microsoft.com/v1.0/users/${user}/messages/${deal.email_id}/attachments/${att.id}/$value`
+          try {
+            buf = await graphGetBuffer(contentUrl, token)
+          } catch { continue }
+        }
+
+        try {
+          const parser = new PDFParse({ data: new Uint8Array(buf) })
+          await parser.load()
+          const textResult = await parser.getText()
+          const allText = textResult.pages?.map(p => p.text).join('\n') || ''
+          const info = extractDealInfo(allText)
+          if (info.state) { foundState = info.state; break }
+        } catch { continue }
+      }
+
+      if (foundState) {
+        await supabase.from('deals').update({ state: foundState }).eq('id', deal.id)
+        updated++
+        console.log(`[backfill] Deal ${deal.id} → ${foundState}`)
+      } else {
+        noState++
+      }
+    } catch (err) {
+      console.error(`[backfill] Deal ${deal.id} error:`, err.message)
+      failed++
+    }
+  }
+
+  console.log(`[backfill] Done: ${updated} updated, ${noState} no state found, ${failed} failed`)
+  res.json({ total: deals.length, updated, noState, failed })
 })
 
 // Wrapped version that never throws — keeps setInterval alive
