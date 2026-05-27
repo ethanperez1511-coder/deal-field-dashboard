@@ -132,8 +132,9 @@ function extractDealInfo(text) {
 async function loadDeals() {
   const { data, error } = await supabase
     .from('deals')
-    .select('id,email_id,business_name,dba,broker_name,true_revenue_avg,avg_holdback_pct,state,subject,from_address,received_at,dashboard_status,dashboard_notes')
+    .select('id,email_id,business_name,dba,broker_name,true_revenue_avg,avg_holdback_pct,state,subject,from_address,received_at,dashboard_status,dashboard_notes,status')
     .neq('dashboard_status', 'Deleted')
+    .not('status', 'in', '("No Attachments","No PDFs")')
     .order('received_at', { ascending: false })
   if (error) {
     console.error('loadDeals failed:', error.message)
