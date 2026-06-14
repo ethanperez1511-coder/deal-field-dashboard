@@ -4,7 +4,7 @@ import { supabase } from './supabaseClient'
 const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '')
 const DETAIL_BASE = 'https://web-production-c0cae.up.railway.app'
 
-const STATUSES = ['Open', 'In U/W', 'Pass', 'Offer Out']
+const STATUSES = ['Open', 'In U/W', 'Pass', 'Pass - 1st', 'Pass - Leverage', 'Pass - Past', 'Pass - TX', 'Pass - Industry', 'Pass - Revs', 'Offer Out']
 const SORT_OPTIONS = [
   { value: 'date-desc', label: 'Newest first' },
   { value: 'date-asc', label: 'Oldest first' },
@@ -17,6 +17,12 @@ const STATUS_CONFIG = {
   Open:        { bg: 'var(--status-open-bg)',  text: 'var(--status-open-text)',  dot: 'var(--status-open-dot)',  accent: '#10B981' },
   'In U/W':    { bg: 'var(--status-uw-bg)',    text: 'var(--status-uw-text)',    dot: 'var(--status-uw-dot)',    accent: '#F59E0B' },
   Pass:        { bg: 'var(--status-pass-bg)',   text: 'var(--status-pass-text)',  dot: 'var(--status-pass-dot)', accent: '#EF4444' },
+  'Pass - 1st':      { bg: 'var(--status-pass-bg)', text: 'var(--status-pass-text)', dot: 'var(--status-pass-dot)', accent: '#EF4444' },
+  'Pass - Leverage': { bg: 'var(--status-pass-bg)', text: 'var(--status-pass-text)', dot: 'var(--status-pass-dot)', accent: '#EF4444' },
+  'Pass - Past':     { bg: 'var(--status-pass-bg)', text: 'var(--status-pass-text)', dot: 'var(--status-pass-dot)', accent: '#EF4444' },
+  'Pass - TX':       { bg: 'var(--status-pass-bg)', text: 'var(--status-pass-text)', dot: 'var(--status-pass-dot)', accent: '#EF4444' },
+  'Pass - Industry': { bg: 'var(--status-pass-bg)', text: 'var(--status-pass-text)', dot: 'var(--status-pass-dot)', accent: '#EF4444' },
+  'Pass - Revs':     { bg: 'var(--status-pass-bg)', text: 'var(--status-pass-text)', dot: 'var(--status-pass-dot)', accent: '#EF4444' },
   'Offer Out': { bg: 'var(--status-offer-bg)',  text: 'var(--status-offer-text)', dot: 'var(--status-offer-dot)', accent: '#3B82F6' },
 }
 
