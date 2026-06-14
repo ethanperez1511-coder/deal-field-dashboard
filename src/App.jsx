@@ -5,6 +5,17 @@ const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://l
 const DETAIL_BASE = 'https://web-production-c0cae.up.railway.app'
 
 const STATUSES = ['Open', 'In U/W', 'Pass', 'Pass - 1st', 'Pass - Leverage', 'Pass - Past', 'Pass - TX', 'Pass - Industry', 'Pass - Revs', 'Offer Out']
+// Top-level statuses shown as stat cards / filter tabs
+const MAIN_STATUSES = ['Open', 'In U/W', 'Pass', 'Offer Out']
+// Pass sub-reasons (shown as a compact secondary row + grouped in dropdowns)
+const PASS_REASONS = STATUSES.filter((s) => s.startsWith('Pass - '))
+// Grouped structure for status <select> menus
+const STATUS_GROUPS = [
+  { options: ['Open', 'In U/W', 'Pass'] },
+  { label: 'Pass reasons', options: PASS_REASONS },
+  { options: ['Offer Out'] },
+]
+const passReasonShort = (s) => s.replace('Pass - ', '')
 const SORT_OPTIONS = [
   { value: 'date-desc', label: 'Newest first' },
   { value: 'date-asc', label: 'Oldest first' },
@@ -24,6 +35,23 @@ const STATUS_CONFIG = {
   'Pass - Industry': { bg: 'var(--status-pass-bg)', text: 'var(--status-pass-text)', dot: 'var(--status-pass-dot)', accent: '#EF4444' },
   'Pass - Revs':     { bg: 'var(--status-pass-bg)', text: 'var(--status-pass-text)', dot: 'var(--status-pass-dot)', accent: '#EF4444' },
   'Offer Out': { bg: 'var(--status-offer-bg)',  text: 'var(--status-offer-text)', dot: 'var(--status-offer-dot)', accent: '#3B82F6' },
+}
+
+// Grouped <option> list for status dropdowns (deal card + bulk)
+function StatusOptions() {
+  return STATUS_GROUPS.map((g, i) =>
+    g.label ? (
+      <optgroup key={i} label={g.label}>
+        {g.options.map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </optgroup>
+    ) : (
+      g.options.map((s) => (
+        <option key={s} value={s}>{s}</option>
+      ))
+    )
+  )
 }
 
 function formatCurrency(amount) {
@@ -160,9 +188,7 @@ function DealCard({ deal, onStatusChange, onNotesChange, onDelete, index, select
           className={`status-select shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold ${flashing ? 'status-changed' : ''}`}
           style={{ backgroundColor: cfg.bg, color: cfg.text }}
         >
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
+          <StatusOptions />
         </select>
       </div>
 
@@ -471,11 +497,35 @@ export default function App() {
             </div>
           </div>
 
-          {/* Stat cards */}
+          {/* Stat cards — main statuses */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {STATUSES.map((s, i) => (
+            {MAIN_STATUSES.map((s, i) => (
               <StatCard key={s} label={s} color={STATUS_CONFIG[s].dot} count={counts[s]} total={deals.length} delay={i * 100} />
             ))}
+          </div>
+
+          {/* Pass reasons — compact, clickable to filter */}
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+              Pass reasons
+            </span>
+            {PASS_REASONS.map((s) => {
+              const isActive = filter === s
+              return (
+                <button
+                  key={s}
+                  onClick={() => setFilter(s)}
+                  className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all"
+                  style={{
+                    backgroundColor: isActive ? 'var(--status-pass-dot)' : 'var(--status-pass-bg)',
+                    color: isActive ? '#fff' : 'var(--status-pass-text)',
+                  }}
+                >
+                  {passReasonShort(s)}
+                  <span className="tabular-nums opacity-70">{counts[s]}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
       </header>
@@ -485,7 +535,7 @@ export default function App() {
         <div className="mx-auto max-w-7xl flex flex-wrap items-center gap-3">
           {/* Filter tabs */}
           <div className="flex gap-1 overflow-x-auto">
-            {['All', ...STATUSES].map((s) => {
+            {['All', ...MAIN_STATUSES].map((s) => {
               const isActive = filter === s
               return (
                 <button
@@ -549,9 +599,7 @@ export default function App() {
               style={{ borderColor: '#BFDBFE' }}
             >
               <option value="">Change status to...</option>
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
+              <StatusOptions />
             </select>
             {bulkStatus && (
               <button onClick={bulkUpdateStatus} className="rounded-lg px-3 py-1 text-xs font-medium text-white" style={{ backgroundColor: 'var(--accent)' }}>
